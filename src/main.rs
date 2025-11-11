@@ -1,4 +1,6 @@
 use std::{hash::{DefaultHasher, Hash, Hasher}, vec};
+mod fields;
+use crate::fields::goldilocks::FpGoldilocks;
 
 //Computes hash(a,b)
 fn compute_hash(t:u64,t2:u64)->u64{
@@ -9,15 +11,15 @@ fn compute_hash(t:u64,t2:u64)->u64{
 }
 
 //Compute hash(a)
-fn compute_hash_one(t:u64)->u64{
+fn compute_hash_one(t:FpGoldilocks)->FpGoldilocks{
     let mut s = DefaultHasher::new();
     t.hash(&mut s);
     s.finish()
 }
 
 //Return hashed leaf values
-fn compute_has_list(leaf_arr:&Vec<u64>)->Vec<u64>{
-    let mut hashed_leaf_arr:Vec<u64> = Vec::new();
+fn compute_has_list(leaf_arr:&Vec<FpGoldilocks>)->Vec<FpGoldilocks>{
+    let mut hashed_leaf_arr:Vec<FpGoldilocks> = Vec::new();
     for leaf in leaf_arr{
         hashed_leaf_arr.push(compute_hash_one(*leaf));
     }
@@ -120,7 +122,15 @@ fn verify_opening(mut opening_idx:usize,opening_value:u64,authentication_paths:&
 fn main() {
 
     //Prover computes merkle root
-    let leaf_arr:Vec<u64> = vec![10,20,30,40,50,60,70];
+    let leaf_arr:Vec<FpGoldilocks> = vec![
+        FpGoldilocks::from(10),
+        FpGoldilocks::from(20),
+        FpGoldilocks::from(30),
+        FpGoldilocks::from(40),
+        FpGoldilocks::from(50),
+        FpGoldilocks::from(60),
+        FpGoldilocks::from(70)
+    ];
     let leaf_arr_hash:Vec<u64> = compute_has_list(&leaf_arr);
     let merkle_root = commit(leaf_arr_hash.clone());
     println!("Merkle root of commitment: {:?}",merkle_root);
