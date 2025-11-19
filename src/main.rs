@@ -147,6 +147,31 @@ fn evaluate_poly_from_domain(p:&DensePolynomial<FpGoldilocks>,evaluation_domain:
     RS_CODEWORD
 }
 
+//Check if value exist in a list
+fn check_if_exist(v_list:&Vec<FpGoldilocks>,val:FpGoldilocks)->bool{
+    for v in v_list{
+        if *v == val{
+            return true;
+        }
+    }
+    false
+}
+
+//Folded evaluation domain
+fn fold_domain(domain:&Vec<FpGoldilocks>)->Vec<FpGoldilocks>{
+    let mut folded_domain:Vec<FpGoldilocks> = Vec::new();
+
+    for d in domain{
+        let d_squared:FpGoldilocks = get_power_fp(*d, 2);
+        let does_exist:bool = check_if_exist(&folded_domain, d_squared);
+        if !does_exist{
+            folded_domain.push(d_squared);
+        } 
+    }   
+
+    folded_domain
+}
+
 fn main() {
 
     // Fibbonaci execution trace (Size: 2^k)
@@ -238,6 +263,18 @@ fn main() {
         "Round 1 challenge",         // label for the challenge
     );
 
+    domsep = <DomainSeparator<DefaultHash> as FieldDomainSeparator<FpGoldilocks>>::add_scalars(
+        domsep,
+        1,
+        "merkle root CP",
+    );
+
+    domsep = <DomainSeparator<DefaultHash> as FieldDomainSeparator<FpGoldilocks>>::challenge_scalars(
+        domsep,
+        1,               // number of scalars for the challenge
+        "Folded challenge",         // label for the challenge
+    );
+
     let mut prover_state = domsep.to_prover_state();
   
     // Add transcript
@@ -250,7 +287,40 @@ fn main() {
     let composition_poly = q_poly_0*alpha0 + q_poly_1*alpha1 + q_poly_second_final*alpha2 + q_poly_final*alpha3 + t_q_poly*alpha4;
     
     //Merkle commitment
-    let RS_CODEWORDS:Vec<FpGoldilocks> = evaluate_poly_from_domain(&composition_poly,lde_evaluation_domain); // Evaluation of polynomial over the extended domain (Reed solomon codewords)
+    let RS_CODEWORDS:Vec<FpGoldilocks> = evaluate_poly_from_domain(&composition_poly,lde_evaluation_domain.clone()); // Evaluation of polynomial over the extended domain (Reed solomon codewords)
     let trace_merkle_root:FpGoldilocks = commit(RS_CODEWORDS);
+
+
+    //Sample for linear combination in folded polynomial
+    prover_state.add_scalars(&[trace_merkle_root]).expect("Fiat shamir error!! Scalar addition failed"); 
+    let [r_challenge]: [FpGoldilocks; 1] = prover_state.challenge_scalars().expect("Fiat shamir error!! Challenge genration failed");  
+    
+    // FRI
+    let coeff_list:&[FpGoldilocks] = composition_poly.coeffs();
+    let mut even_coeffs:Vec<FpGoldilocks> = Vec::new();
+    let mut odd_coeffs:Vec<FpGoldilocks> = Vec::new();
+    let mut index:usize = 0;
+    for c in coeff_list{
+        //Even coeffcients
+        if index%2 == 0{
+            even_coeffs.push(*c);
+        }else{
+            odd_coeffs.push(*c);
+        }
+        index = index+1;
+    }
+
+    let f_even_poly:DensePolynomial<FpGoldilocks> = DensePolynomial::from_coefficients_vec(even_coeffs);
+    let f_odd_poly:DensePolynomial<FpGoldilocks> = DensePolynomial::from_coefficients_vec(odd_coeffs);
+    let folded_poly:DensePolynomial<FpGoldilocks> = f_even_poly + f_odd_poly.mul(r_challenge);
+
+    //Commit to folded evaluation domain
+    let folded_domain:Vec<FpGoldilocks> = fold_domain(&lde_evaluation_domain);
+    let folded_rs_codewords:Vec<FpGoldilocks> = evaluate_poly_from_domain(&folded_poly,folded_domain); // Evaluation of polynomial over the extended domain (Reed solomon codewords)
+    let folded_root:FpGoldilocks =  commit(folded_rs_codewords);
+
+    
+
+
 
 }
