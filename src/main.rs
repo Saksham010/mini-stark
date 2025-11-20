@@ -2,11 +2,14 @@ mod fields;
 mod merkle;
 use crate::fields::goldilocks::FpGoldilocks;
 use crate::merkle::merkle::commit;
+use ark_poly::Polynomial;
 use ark_poly::{EvaluationDomain,Radix2EvaluationDomain,univariate::DensePolynomial,DenseUVPolynomial}; 
 use ark_std::rand::{thread_rng};
-use ark_ff::{AdditiveGroup, UniformRand};
+use ark_ff::{AdditiveGroup, UniformRand,PrimeField,BigInteger};
 use spongefish::codecs::arkworks_algebra::*;  
 use spongefish::{DomainSeparator,DefaultHash};
+use ark_serialize::CanonicalSerialize;
+
 
 use std::ops::{Mul};
 
@@ -172,6 +175,17 @@ fn fold_domain(domain:&Vec<FpGoldilocks>)->Vec<FpGoldilocks>{
     folded_domain
 }
 
+// Get index within a bound
+fn get_bounded_index(index:FpGoldilocks, bound:usize)->usize{
+    let mut bytes = Vec::new();
+    index.serialize_compressed(&mut bytes).unwrap(); // deterministic serialization
+    let mut temp_index:usize = bytes[0] as usize;
+    while temp_index > bound {
+        temp_index = temp_index/bound;
+    }
+    temp_index
+}
+
 fn main() {
 
     // Fibbonaci execution trace (Size: 2^k)
@@ -275,6 +289,18 @@ fn main() {
         "Folded challenge",         // label for the challenge
     );
 
+    domsep = <DomainSeparator<DefaultHash> as FieldDomainSeparator<FpGoldilocks>>::add_scalars(
+        domsep,
+        1,
+        "folded merkle root",
+    );
+
+    domsep = <DomainSeparator<DefaultHash> as FieldDomainSeparator<FpGoldilocks>>::challenge_scalars(
+        domsep,
+        1,               // number of scalars for the challenge
+        "Index challenge",         // label for the challenge
+    );
+
     let mut prover_state = domsep.to_prover_state();
   
     // Add transcript
@@ -288,8 +314,7 @@ fn main() {
     
     //Merkle commitment
     let RS_CODEWORDS:Vec<FpGoldilocks> = evaluate_poly_from_domain(&composition_poly,lde_evaluation_domain.clone()); // Evaluation of polynomial over the extended domain (Reed solomon codewords)
-    let trace_merkle_root:FpGoldilocks = commit(RS_CODEWORDS);
-
+    let trace_merkle_root:FpGoldilocks = commit(RS_CODEWORDS.clone());
 
     //Sample for linear combination in folded polynomial
     prover_state.add_scalars(&[trace_merkle_root]).expect("Fiat shamir error!! Scalar addition failed"); 
@@ -316,11 +341,31 @@ fn main() {
 
     //Commit to folded evaluation domain
     let folded_domain:Vec<FpGoldilocks> = fold_domain(&lde_evaluation_domain);
-    let folded_rs_codewords:Vec<FpGoldilocks> = evaluate_poly_from_domain(&folded_poly,folded_domain); // Evaluation of polynomial over the extended domain (Reed solomon codewords)
-    let folded_root:FpGoldilocks =  commit(folded_rs_codewords);
+    let folded_domain_len:usize = folded_domain.len();
+    let folded_rs_codewords:Vec<FpGoldilocks> = evaluate_poly_from_domain(&folded_poly,folded_domain.clone()); // Evaluation of polynomial over the extended domain (Reed solomon codewords)
+    let folded_root:FpGoldilocks =  commit(folded_rs_codewords.clone());
 
+    //Verifier
     
+    //Sample random index 'i' for query
+    prover_state.add_scalars(&[folded_root]).expect("Fiat shamir error!! Scalar addition failed");  
+    let [index_challenge]: [FpGoldilocks; 1] = prover_state.challenge_scalars().expect("Fiat shamir error!! Challenge genration failed");  
+    let sample_index:usize = get_bounded_index(index_challenge,folded_domain_len);
 
+    //Collinearity test
+    // A = (w^i,f(w^i)), B = (-w^i,f(w^N/2+i)), C = (r, folded_f((w^i))^2)
+    let x_list = vec![
+        lde_evaluation_domain[sample_index],
+        lde_evaluation_domain[(lde_evaluation_domain.len()/2) + sample_index],
+    ];
+    let y_list = vec![
+        RS_CODEWORDS[sample_index],
+        RS_CODEWORDS[(lde_evaluation_domain.len()/2) + sample_index],
+    ];
 
+    let a_b_poly:DensePolynomial<FpGoldilocks> = lagrange_interpolation(&x_list,y_list); //Intepolate A,B 
+    let a_b_poly_eval = a_b_poly.evaluate(&r_challenge); //Colinearity test
+    assert_eq!(a_b_poly_eval,folded_rs_codewords[sample_index]); // eval ===? f(w^i)^2
 
 }
+
