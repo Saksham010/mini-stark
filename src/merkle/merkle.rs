@@ -2,7 +2,7 @@ use crate::fields::goldilocks::{FpGoldilocks};
 use spongefish::{DomainSeparator, DefaultHash};  
 use spongefish::codecs::arkworks_algebra::*;  
 
-fn compute_hash_one(t: FpGoldilocks) -> FpGoldilocks {  
+pub fn compute_hash_one(t: FpGoldilocks) -> FpGoldilocks {  
     let mut domsep = <DomainSeparator<DefaultHash> as FieldDomainSeparator<FpGoldilocks>>::add_scalars(
         DomainSeparator::<DefaultHash>::new("hash-one"),
         1,
@@ -48,7 +48,7 @@ fn compute_hash(a: FpGoldilocks, b: FpGoldilocks) -> FpGoldilocks {
 }
 
 //Return hashed leaf values
-fn compute_hash_list(leaf_arr:&Vec<FpGoldilocks>)->Vec<FpGoldilocks>{
+pub fn compute_hash_list(leaf_arr:&Vec<FpGoldilocks>)->Vec<FpGoldilocks>{
     let mut hashed_leaf_arr:Vec<FpGoldilocks> = Vec::new();
     for leaf in leaf_arr{
         hashed_leaf_arr.push(compute_hash_one(*leaf));
@@ -84,7 +84,7 @@ pub fn commit(mut leaf_arr_h:Vec<FpGoldilocks>)->FpGoldilocks {
 }
 
 //Returns authentication paths for commited value
-fn compute_sibling_values(mut val_idx:usize,mut leaf_arr_h:Vec<FpGoldilocks>)->Vec<FpGoldilocks>{
+pub fn compute_sibling_values(mut val_idx:usize,mut leaf_arr_h:Vec<FpGoldilocks>)->Vec<FpGoldilocks>{
 
     let mut N = leaf_arr_h.len();
     let mut k:usize = 0;
@@ -124,8 +124,9 @@ fn compute_sibling_values(mut val_idx:usize,mut leaf_arr_h:Vec<FpGoldilocks>)->V
 }
 
 // Verify merkle root at opening value
-fn verify_opening(mut opening_idx:usize,opening_value:FpGoldilocks,authentication_paths:&Vec<FpGoldilocks>,merkle_root:&FpGoldilocks)->bool{
-    let mut hash_val:FpGoldilocks = compute_hash_one(opening_value);
+pub fn verify_opening(mut opening_idx:usize,opening_value_hash:FpGoldilocks,authentication_paths:&Vec<FpGoldilocks>,merkle_root:&FpGoldilocks)->bool{
+    // let mut hash_val:FpGoldilocks = compute_hash_one(opening_value);
+    let mut hash_val:FpGoldilocks = opening_value_hash;
 
     for sibling in authentication_paths{
         if opening_idx %2 == 0 {
@@ -173,6 +174,6 @@ fn verify_opening(mut opening_idx:usize,opening_value:FpGoldilocks,authenticatio
 //     println!("Authentication paths: {:?}",authentication_paths);
 
 //     //Verifier opens proof at the value
-//     let is_valid_opening:bool = verify_opening(val_proof_idx,val_proof,&authentication_paths,&merkle_root);
+//     let is_valid_opening:bool = verify_opening(val_proof_idx,compute_hash_one(val_proof),&authentication_paths,&merkle_root);
 //     println!("Merkle root validation: {:?}",is_valid_opening);
 // }
