@@ -177,24 +177,37 @@ fn fold_domain(domain:&Vec<FpGoldilocks>)->Vec<FpGoldilocks>{
 
 // Get index within a bound
 fn get_bounded_index(index:FpGoldilocks, bound:usize)->usize{
+    if bound == 0{
+        return 0;
+    }
     let mut bytes = Vec::new();
     index.serialize_compressed(&mut bytes).unwrap(); // deterministic serialization
     let mut temp_index:usize = bytes[0] as usize;
     while temp_index > bound {
-        temp_index = temp_index/bound;
+        temp_index = temp_index%bound;
     }
+
     temp_index
 }
 
-fn verify_commitment(commit_index:usize, commit_val_hash:FpGoldilocks, leaves_hash:Vec<FpGoldilocks>,merkle_root:FpGoldilocks){
+fn verify_commitment(commit_index:usize, commit_val_hash:FpGoldilocks, authentication_paths:Vec<FpGoldilocks>,merkle_root:FpGoldilocks){
 
-    let authentication_paths:Vec<FpGoldilocks> = compute_sibling_values(commit_index, leaves_hash);
+    // let authentication_paths:Vec<FpGoldilocks> = compute_sibling_values(commit_index, leaves_hash);
     // println!("Authentication paths: {:?}",authentication_paths);
 
     // //Verifier opens proof at the value
     let is_valid_opening:bool = verify_opening(commit_index,commit_val_hash,&authentication_paths,&merkle_root);
     println!("Is valid opening: {:?}",is_valid_opening);
     assert_eq!(is_valid_opening,true);
+}
+
+// Returns merge list
+fn merge_list(vec_one:Vec<FpGoldilocks>,vec_two:&Vec<FpGoldilocks>)->Vec<FpGoldilocks>{
+    let mut merged_list:Vec<FpGoldilocks> = vec_one;
+    for value in vec_two{
+        merged_list.push(*value);
+    }
+    merged_list
 }
 
 fn main() {
@@ -356,6 +369,7 @@ fn main() {
     let mut unfolded_merkle_root:FpGoldilocks = trace_merkle_root;
     let mut query_challenge:FpGoldilocks = index_challenge;
     let mut round:usize = 1;
+    let mut proof:Vec<Vec<FpGoldilocks>> = Vec::new(); // Per round [[root,authentication_paths]...]
 
     while unfolded_evaluation_domain.len() > 1 {
         println!("ROUND: {:?}",round);
@@ -378,7 +392,6 @@ fn main() {
         let f_even_poly:DensePolynomial<FpGoldilocks> = DensePolynomial::from_coefficients_vec(even_coeffs);
         let f_odd_poly:DensePolynomial<FpGoldilocks> = DensePolynomial::from_coefficients_vec(odd_coeffs);
         let folded_poly:DensePolynomial<FpGoldilocks> = f_even_poly + f_odd_poly.mul(r_challenge);
-
         //Commit to folded evaluation domain
         let folded_domain:Vec<FpGoldilocks> = fold_domain(&unfolded_evaluation_domain);
         let folded_domain_len:usize = folded_domain.len();
@@ -391,16 +404,80 @@ fn main() {
         // Verify merkle roots with authentication paths
         
         // For unfolded merkle root
+        let authentication_paths_one:Vec<FpGoldilocks> = compute_sibling_values(query_index, unfolded_codewords_hash.clone());
+        let authentication_paths_two:Vec<FpGoldilocks> = compute_sibling_values((unfolded_evaluation_domain.len()/2) + query_index, unfolded_codewords_hash.clone());
+        let authentication_paths_three:Vec<FpGoldilocks> = compute_sibling_values(query_index, folded_rs_codewords_hash);
+
+        //Add proof
+        let mut proof_one:Vec<FpGoldilocks> = Vec::new();
+        let mut proof_two:Vec<FpGoldilocks> = Vec::new();
+        let mut proof_three:Vec<FpGoldilocks> = Vec::new();
+
+        if round == 1{
+            //Add proof 
+            proof_one = merge_list(
+                vec![unfolded_merkle_root,FpGoldilocks::from(query_index as u64)],
+                &authentication_paths_one
+            );
+            proof_two = merge_list(
+                vec![FpGoldilocks::from(((unfolded_evaluation_domain.len()/2) + query_index) as u64)],
+                &authentication_paths_two
+            );
+            proof_three = merge_list(
+                vec![folded_root,FpGoldilocks::from(query_index as u64)],
+                &authentication_paths_three
+            );
+        }else{
+            //Add proof 
+            proof_one = merge_list(
+                vec![FpGoldilocks::from(query_index as u64)],
+                &authentication_paths_one
+            );
+            proof_two = merge_list(
+                vec![FpGoldilocks::from(((unfolded_evaluation_domain.len()/2) + query_index) as u64)],
+                &authentication_paths_two
+            );
+            proof_three = merge_list(
+                vec![folded_root,FpGoldilocks::from(query_index as u64)],
+                &authentication_paths_three
+            );
+        }
+        proof.push(proof_one);
+        proof.push(proof_two);
+        proof.push(proof_three);
+
+
+        // let proof_one:Vec<FpGoldilocks> = merge_list(
+        //     vec![unfolded_merkle_root,FpGoldilocks::from(query_index as u64)],
+        //     &authentication_paths_one
+        // );
+        // let proof_two:Vec<FpGoldilocks> = merge_list(
+        //     vec![unfolded_merkle_root,FpGoldilocks::from(((unfolded_evaluation_domain.len()/2) + query_index) as u64)],
+        //     &authentication_paths_two
+        // );
+        // let proof_three:Vec<FpGoldilocks> = merge_list(
+        //     vec![folded_root,FpGoldilocks::from(query_index as u64)],
+        //     &authentication_paths_three
+        // );
+
+
+        // let merged_proof_one_two:Vec<FpGoldilocks> = merge_list(proof_one, &proof_two);
+        // let merged_proof:Vec<FpGoldilocks> = merge_list(merged_proof_one_two, &proof_three);
+
+        // proof.push(merged_proof);
+
+        //Verify commitments
         verify_commitment(// f(w^i)
             query_index,
             compute_hash_one(unfolded_codewords[query_index]),
-            unfolded_codewords_hash.clone(),
+            authentication_paths_one,
             unfolded_merkle_root
         ); 
+
         verify_commitment( // f(-w^i)
             (unfolded_evaluation_domain.len()/2) + query_index,
         compute_hash_one(unfolded_codewords[(unfolded_evaluation_domain.len()/2) + query_index]),
-        unfolded_codewords_hash.clone(),
+            authentication_paths_two,
             unfolded_merkle_root
         ); 
 
@@ -408,7 +485,7 @@ fn main() {
         verify_commitment( // f((-w^i))^2
             query_index,
         compute_hash_one(folded_rs_codewords[query_index]),
-        folded_rs_codewords_hash,
+            authentication_paths_three,
             folded_root
         ); 
 
@@ -427,29 +504,16 @@ fn main() {
         let a_b_poly_eval = a_b_poly.evaluate(&r_challenge); //Colinearity test
         assert_eq!(a_b_poly_eval,folded_rs_codewords[query_index]); // eval ===? f(w^i)^2
 
-        // Update
-        // let round_add_label = String::from("Folded root add round  ") + &round.to_string();
-        // let round_challenge_label = String::from("Folded root challenge round: ") + &round.to_string();
+        // Other rounds
+        if folded_domain_len != 1{
+            prover_state.add_scalars(&[folded_root]).expect("Fiat shamir error!! Scalar addition failed");  
+            let [sample_index_challenge]: [FpGoldilocks; 1] = prover_state.challenge_scalars().expect("Fiat shamir error!! Challenge genration failed");  
+            query_challenge = sample_index_challenge;
 
-        // Update domain seperator for sample query index
-        // domsep = <DomainSeparator<DefaultHash> as FieldDomainSeparator<FpGoldilocks>>::add_scalars(
-        // domsep,
-        // 1,
-        // &round_add_label,
-        // );
-
-        // domsep = <DomainSeparator<DefaultHash> as FieldDomainSeparator<FpGoldilocks>>::challenge_scalars(
-        //     domsep,
-        //     1,               // number of scalars for the challenge
-        //     &round_challenge_label,         // label for the challenge
-        // );
-
-        // if round == 4{}
-
-        println!("Made it here");
-        prover_state.add_scalars(&[folded_root]).expect("Fiat shamir error!! Scalar addition failed");  
-        let [sample_index_challenge]: [FpGoldilocks; 1] = prover_state.challenge_scalars().expect("Fiat shamir error!! Challenge genration failed");  
-        query_challenge = sample_index_challenge;
+        }else if folded_domain_len == 1{ //Second last round
+            //Push the constant polynomial 
+            proof.push(vec![folded_poly.coeffs()[0]]);
+        }
         
         unfolded_codewords = evaluate_poly_from_domain(&folded_poly,folded_domain.clone()); // Evaluation of polynomial over the extended domain (Reed solomon codewords)
         unfolded_codewords_hash = compute_hash_list(&unfolded_codewords);
@@ -459,5 +523,7 @@ fn main() {
         unfolded_evaluation_domain = folded_domain;
         round = round + 1;
     }
+
+    println!("Proof element: {:?}",proof);
 }
 
