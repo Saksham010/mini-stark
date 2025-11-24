@@ -9,9 +9,14 @@ use ark_ff::{AdditiveGroup, UniformRand,PrimeField,BigInteger};
 use spongefish::codecs::arkworks_algebra::*;  
 use spongefish::{DomainSeparator,DefaultHash};
 use ark_serialize::CanonicalSerialize;
+use ark_serialize::CanonicalDeserialize;
 
+use std::io::{Result,Read,Cursor};
+// use ark_serialize::Write;
 
 use std::ops::{Mul};
+
+use base64::{engine::general_purpose, Engine as _}; // Import the Engine trait
 
 
 //Convert list in fp_list
@@ -192,9 +197,6 @@ fn get_bounded_index(index:FpGoldilocks, bound:usize)->usize{
 
 fn verify_commitment(commit_index:usize, commit_val_hash:FpGoldilocks, authentication_paths:Vec<FpGoldilocks>,merkle_root:FpGoldilocks){
 
-    // let authentication_paths:Vec<FpGoldilocks> = compute_sibling_values(commit_index, leaves_hash);
-    // println!("Authentication paths: {:?}",authentication_paths);
-
     // //Verifier opens proof at the value
     let is_valid_opening:bool = verify_opening(commit_index,commit_val_hash,&authentication_paths,&merkle_root);
     println!("Is valid opening: {:?}",is_valid_opening);
@@ -208,6 +210,64 @@ fn merge_list(vec_one:Vec<FpGoldilocks>,vec_two:&Vec<FpGoldilocks>)->Vec<FpGoldi
         merged_list.push(*value);
     }
     merged_list
+}
+
+//Generate proof string
+fn generate_proof_string(proof:&Vec<FpGoldilocks>)->String{
+    let mut proof_binary:Vec<u8> = Vec::new();
+    for p in proof{
+        let mut serialized_data = Vec::new();
+        let _ = p.serialize_uncompressed(&mut serialized_data);
+        let data_len: Vec<u8> = vec![serialized_data.len() as u8];
+        proof_binary.extend(data_len);
+        proof_binary.extend(serialized_data); 
+    }
+
+    let proof_string = general_purpose::STANDARD.encode(proof_binary.clone());
+    proof_string
+    
+}
+
+//Concatenate proof string
+fn concatenate_proof_string(proof:Vec<Vec<FpGoldilocks>>)->String{
+    let mut proof_string = String::from("");
+    for p in proof {
+        let proof_s = generate_proof_string(&p);
+        proof_string = proof_string + &proof_s;        
+    }
+    proof_string
+}
+
+
+
+// Parse proof string
+pub fn parse_proof(proof:&str) -> Vec<FpGoldilocks>{
+    let proof_binary:Vec<u8> =  general_purpose::STANDARD.decode(proof).expect("Invalid proof !!");
+    let mut cursor = Cursor::new(&proof_binary[..]);
+    let mut deserialized_proof:Vec<FpGoldilocks> = Vec::new();
+
+    //Deserialize proof elements
+    while (cursor.position() as usize) < cursor.get_ref().len(){ 
+    
+        //Read the length
+        let mut element_len =[0u8];
+        cursor.read_exact(&mut element_len).expect("Invalid proof !!"); // Read element length
+        let mut element: Vec<u8> = vec![0u8;element_len[0] as usize];
+        cursor.read_exact(&mut element).expect("Invalid proof !!"); //Read element
+
+        //Deseralize
+        let mut cursor_element = Cursor::new(element);
+        let deserialized_element:FpGoldilocks = FpGoldilocks::deserialize_uncompressed(&mut cursor_element).expect("Invalid proof !!");
+        deserialized_proof.push(deserialized_element); //Push the element
+
+    }
+    deserialized_proof
+}
+
+
+//Convert FpGoldilocks to usize
+fn unsafe_goldilocks_to_usize(x: FpGoldilocks) -> usize {
+    x.into_bigint().0[0] as usize
 }
 
 fn main() {
@@ -412,59 +472,60 @@ fn main() {
         let mut proof_one:Vec<FpGoldilocks> = Vec::new();
         let mut proof_two:Vec<FpGoldilocks> = Vec::new();
         let mut proof_three:Vec<FpGoldilocks> = Vec::new();
-
+        
         if round == 1{
             //Add proof 
             proof_one = merge_list(
-                vec![unfolded_merkle_root,FpGoldilocks::from(query_index as u64)],
+                vec![
+                    unfolded_merkle_root,
+                    FpGoldilocks::from(query_index as u64),
+                    compute_hash_one(unfolded_codewords[query_index]),
+                    FpGoldilocks::from(authentication_paths_one.len() as u64)],
                 &authentication_paths_one
             );
             proof_two = merge_list(
-                vec![FpGoldilocks::from(((unfolded_evaluation_domain.len()/2) + query_index) as u64)],
+                vec![
+                    FpGoldilocks::from(((unfolded_evaluation_domain.len()/2) + query_index) as u64),
+                    compute_hash_one(unfolded_codewords[(unfolded_evaluation_domain.len()/2) + query_index]),
+                    FpGoldilocks::from(authentication_paths_two.len() as u64)],
                 &authentication_paths_two
             );
             proof_three = merge_list(
-                vec![folded_root,FpGoldilocks::from(query_index as u64)],
+                vec![
+                    folded_root,
+                    FpGoldilocks::from(query_index as u64),
+                    compute_hash_one(folded_rs_codewords[query_index]),
+                    FpGoldilocks::from(authentication_paths_three.len() as u64)],
                 &authentication_paths_three
             );
         }else{
             //Add proof 
             proof_one = merge_list(
-                vec![FpGoldilocks::from(query_index as u64)],
+                vec![
+                    FpGoldilocks::from(query_index as u64),
+                    compute_hash_one(unfolded_codewords[query_index]),
+                    FpGoldilocks::from(authentication_paths_one.len() as u64)],
                 &authentication_paths_one
             );
             proof_two = merge_list(
-                vec![FpGoldilocks::from(((unfolded_evaluation_domain.len()/2) + query_index) as u64)],
+                vec![
+                    FpGoldilocks::from(((unfolded_evaluation_domain.len()/2) + query_index) as u64),
+                    compute_hash_one(unfolded_codewords[(unfolded_evaluation_domain.len()/2) + query_index]),
+                    FpGoldilocks::from(authentication_paths_two.len() as u64)],
                 &authentication_paths_two
             );
             proof_three = merge_list(
-                vec![folded_root,FpGoldilocks::from(query_index as u64)],
+                vec![
+                    folded_root,
+                    FpGoldilocks::from(query_index as u64),
+                    compute_hash_one(folded_rs_codewords[query_index]),
+                    FpGoldilocks::from(authentication_paths_three.len() as u64)],
                 &authentication_paths_three
             );
         }
         proof.push(proof_one);
         proof.push(proof_two);
         proof.push(proof_three);
-
-
-        // let proof_one:Vec<FpGoldilocks> = merge_list(
-        //     vec![unfolded_merkle_root,FpGoldilocks::from(query_index as u64)],
-        //     &authentication_paths_one
-        // );
-        // let proof_two:Vec<FpGoldilocks> = merge_list(
-        //     vec![unfolded_merkle_root,FpGoldilocks::from(((unfolded_evaluation_domain.len()/2) + query_index) as u64)],
-        //     &authentication_paths_two
-        // );
-        // let proof_three:Vec<FpGoldilocks> = merge_list(
-        //     vec![folded_root,FpGoldilocks::from(query_index as u64)],
-        //     &authentication_paths_three
-        // );
-
-
-        // let merged_proof_one_two:Vec<FpGoldilocks> = merge_list(proof_one, &proof_two);
-        // let merged_proof:Vec<FpGoldilocks> = merge_list(merged_proof_one_two, &proof_three);
-
-        // proof.push(merged_proof);
 
         //Verify commitments
         verify_commitment(// f(w^i)
@@ -512,7 +573,8 @@ fn main() {
 
         }else if folded_domain_len == 1{ //Second last round
             //Push the constant polynomial 
-            proof.push(vec![folded_poly.coeffs()[0]]);
+            let t_hash = compute_hash_one(folded_poly.coeffs()[0]);
+            proof.push(vec![t_hash]);
         }
         
         unfolded_codewords = evaluate_poly_from_domain(&folded_poly,folded_domain.clone()); // Evaluation of polynomial over the extended domain (Reed solomon codewords)
@@ -525,5 +587,110 @@ fn main() {
     }
 
     println!("Proof element: {:?}",proof);
+    println!("-------------------------------------------");
+    // Convert proof to string 
+    let proof_string:String = concatenate_proof_string(proof);
+    // println!("Proof string: {:?}",proof_string);
+
+    //Verifier 
+
+    let proof_elements_vr = parse_proof(&proof_string);
+    // println!("Parsed proof string: {:?}",proof_elements_vr);
+
+    let mut temp_proof_list:Vec<FpGoldilocks> = Vec::new();
+    let mut proof_list_vr:Vec<Vec<FpGoldilocks>> = Vec::new();
+    let mut proof_list_round_vr:Vec<Vec<Vec<FpGoldilocks>>> = Vec::new(); // Roundwise proof elements
+    let mut auth_path_len_index:usize = 3; //[Root(0),index(1),commitval(2),authpathlen(3)] (Initialize)
+    let mut split_index:usize = 999;
+
+    for index in 0..proof_elements_vr.len(){
+        //Constant value in last 
+        if index+1 == proof_elements_vr.len(){
+            proof_list_round_vr.push(vec![vec![proof_elements_vr[index]]]);
+            break;
+        }
+
+        //First proof format : [Root,index,authpathlen,authpaths]
+        if index == auth_path_len_index {
+            let auth_path_len = proof_elements_vr[index];
+
+            split_index = auth_path_len_index + unsafe_goldilocks_to_usize(auth_path_len);
+            
+            //Update authpathlen index
+            if proof_list_vr.len() % 2 == 0{ //List is even then folded round left
+
+                auth_path_len_index = split_index+3; 
+            }else{//Odd
+                auth_path_len_index = split_index+4;
+            }
+        }
+        temp_proof_list.push(proof_elements_vr[index]);
+
+        //List split per part of a round
+        if index == split_index{
+            proof_list_vr.push(temp_proof_list);
+            temp_proof_list = vec![]; //Empty list
+
+            //If round completed
+            if proof_list_vr.len() == 3{
+                //Push to final 
+                proof_list_round_vr.push(proof_list_vr);
+                //Empty the list
+                proof_list_vr = vec![];
+            }
+
+        }        
+    }
+    println!("Proof by round : {:?}",proof_list_round_vr);
+
+    //Round by round FRI verification
+    let mut prev_round_root:FpGoldilocks = FpGoldilocks::from(0);
+    for (round,round_list) in proof_list_round_vr.iter().enumerate(){
+        if round == 0{ // First round
+            let unfolded_root_vr = round_list[0][0];
+            let unfolded_query_index_one = round_list[0][1];
+            let unfolded_commit_value_one = round_list[0][2];
+            let unfolded_authentication_path_one = &round_list[0][4..];
+            verify_commitment(unsafe_goldilocks_to_usize(unfolded_query_index_one), unfolded_commit_value_one, unfolded_authentication_path_one.to_vec(), unfolded_root_vr);
+
+            let unfolded_query_index_two = round_list[1][0];
+            let unfolded_commit_value_two = round_list[1][1];
+            let unfolded_authentication_path_two = &round_list[1][3..];
+            verify_commitment(unsafe_goldilocks_to_usize(unfolded_query_index_two), unfolded_commit_value_two, unfolded_authentication_path_two.to_vec(), unfolded_root_vr);
+
+            let folded_root_vr = round_list[2][0];
+            let folded_query_index = round_list[2][1];
+            let folded_commit_value = round_list[2][2];
+            let folded_authentication_path = &round_list[2][4..];
+            verify_commitment(unsafe_goldilocks_to_usize(folded_query_index), folded_commit_value, folded_authentication_path.to_vec(), folded_root_vr);
+
+            //Update previous root
+            prev_round_root = folded_root_vr;
+        }else if round+1 == proof_list_round_vr.len(){//Last round
+            continue;
+
+        }else{
+            //Other rounds
+            let unfolded_root_vr = prev_round_root;
+            let unfolded_query_index_one = round_list[0][0];
+            let unfolded_commit_value_one = round_list[0][1];
+            let unfolded_authentication_path_one = &round_list[0][3..];
+            verify_commitment(unsafe_goldilocks_to_usize(unfolded_query_index_one), unfolded_commit_value_one, unfolded_authentication_path_one.to_vec(), unfolded_root_vr);
+
+            let unfolded_query_index_two = round_list[1][0];
+            let unfolded_commit_value_two = round_list[1][1];
+            let unfolded_authentication_path_two = &round_list[1][3..];
+            verify_commitment(unsafe_goldilocks_to_usize(unfolded_query_index_two), unfolded_commit_value_two, unfolded_authentication_path_two.to_vec(), unfolded_root_vr);
+
+            let folded_root_vr = round_list[2][0];
+            let folded_query_index = round_list[2][1];
+            let folded_commit_value = round_list[2][2];
+            let folded_authentication_path = &round_list[2][4..];
+            verify_commitment(unsafe_goldilocks_to_usize(folded_query_index), folded_commit_value, folded_authentication_path.to_vec(), folded_root_vr);
+
+            //Update prev root
+            prev_round_root = folded_root_vr;
+        }
+    }
 }
 
