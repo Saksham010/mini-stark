@@ -4,8 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [[bin]]
-name = "main"
+name = "prover"
 path = "./src/main.rs"
+
+[[bin]]
+name = "verifier"
+path = "./src/verifier.rs"
 
 [dependencies]
 ark-bn254 = "0.5.0"
