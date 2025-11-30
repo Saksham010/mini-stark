@@ -1,4 +1,4 @@
-use crate::fields::goldilocks::{FpGoldilocks};
+use crate::FpGoldilocks;
 use spongefish::{DomainSeparator, DefaultHash};  
 use spongefish::codecs::arkworks_algebra::*;  
 
@@ -22,8 +22,6 @@ pub fn compute_hash_one(t: FpGoldilocks) -> FpGoldilocks {
     let [result]:[FpGoldilocks;1] = prover_state.challenge_scalars().unwrap();  
     result  
 }
-
-
 
 //Computes hash(a,b)
 fn compute_hash(a: FpGoldilocks, b: FpGoldilocks) -> FpGoldilocks {
@@ -150,30 +148,3 @@ pub fn verify_opening(mut opening_idx:usize,opening_value_hash:FpGoldilocks,auth
         true
     }else{false}
 }
-
-// fn main() {
-
-//     //Prover computes merkle root
-//     let leaf_arr:Vec<FpGoldilocks> = vec![
-//         FpGoldilocks::from(10),
-//         FpGoldilocks::from(20),
-//         FpGoldilocks::from(30),
-//         FpGoldilocks::from(40),
-//         FpGoldilocks::from(50),
-//         FpGoldilocks::from(60),
-//         FpGoldilocks::from(70)
-//     ];
-//     let leaf_arr_hash:Vec<FpGoldilocks> = compute_hash_list(&leaf_arr);
-//     let merkle_root = commit(leaf_arr_hash.clone());
-//     println!("Merkle root of commitment: {:?}",merkle_root);
-
-//     // Compute sibling values
-//     let val_proof_idx:usize = 3; //30
-//     let val_proof:FpGoldilocks = leaf_arr[val_proof_idx]; // Value to send to prover to prove commitment of the root
-//     let authentication_paths:Vec<FpGoldilocks> = compute_sibling_values(val_proof_idx, leaf_arr_hash.clone());
-//     println!("Authentication paths: {:?}",authentication_paths);
-
-//     //Verifier opens proof at the value
-//     let is_valid_opening:bool = verify_opening(val_proof_idx,compute_hash_one(val_proof),&authentication_paths,&merkle_root);
-//     println!("Merkle root validation: {:?}",is_valid_opening);
-// }
